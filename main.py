@@ -36,6 +36,7 @@ from api.traffic import traffic_api
 from api.savedLocations import savedLocations_api
 from api.verify import verify_api
 from api.live import incident_api
+from api.subscription import subscription_api
 
 # database Initialization functions
 from model.carChat import CarChat
@@ -47,6 +48,7 @@ from model.post import Post, initPosts
 from model.nestPost import NestPost, initNestPosts
 from model.vote import Vote, initVotes
 from model.savedLocations import SavedLocations, initSavedLocations
+from model.subscription import Subscription, SubscriptionRequest, PaymentHistory, RouteUsage, initSubscriptions
 
 
 # server only View
@@ -71,6 +73,7 @@ app.register_blueprint(chat_api, url_prefix='/api')
 app.register_blueprint(savedLocations_api)  # Registering favoriteBooks API
 app.register_blueprint(verify_api)
 app.register_blueprint(incident_api)
+app.register_blueprint(subscription_api)
 
 
 # Tell Flask-Login the view function name of your login route
@@ -210,6 +213,11 @@ def generate_data():
         initSavedLocations()
     except Exception as e:
         print(f"Error in initSavedLocations: {e}")
+
+    try:
+        initSubscriptions()
+    except Exception as e:
+        print(f"Error in initSubscriptions: {e}")
 
 # Backup the old database
 def backup_database(db_uri, backup_uri):

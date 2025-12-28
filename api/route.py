@@ -1,8 +1,10 @@
-from flask import Blueprint, request
+from flask import Blueprint, request, g
 from flask_restful import Api, Resource
 import requests
 import re
 from .traffic import calculate_route_adjustment, get_traffic_level
+from .jwt_authorize import token_required
+from model.subscription import RouteUsage
 
 # Blueprint and API init
 routes_api = Blueprint('routes', __name__, url_prefix='')
@@ -10,6 +12,34 @@ api = Api(routes_api)
 
 # Replace with your actual API key
 API_KEY = 'AIzaSyC0qOeOkWMCMxT0bMAdpQzZesBsZ-zaFOM'
+
+
+def get_user_tier(user):
+    """
+    Get subscription tier for a user.
+    Admins automatically get 'admin' tier with full access.
+    """
+    from model.subscription import Subscription
+    from datetime import datetime
+    
+    # Admin users get full access
+    if hasattr(user, 'role') and user.role == 'Admin':
+        return 'admin'
+    
+    # Check subscription
+    subscription = Subscription.query.filter_by(_user_id=user.id).first()
+    
+    if not subscription:
+        return 'free'
+    
+    # Check if subscription is active and not expired
+    if subscription.status != 'active':
+        return 'free'
+    
+    if subscription.expires_at and subscription.expires_at < datetime.utcnow():
+        return 'free'
+    
+    return subscription.tier or 'free'
 
 
 def strip_html(text):
@@ -30,8 +60,26 @@ def format_duration(minutes):
 
 class RoutesAPI:
     class _GetRoutes(Resource):
+        @token_required()
         def post(self):
             try:
+                user = g.current_user
+                tier = get_user_tier(user)
+                
+                # Check if user can use a route
+                can_use, usage_info = RouteUsage.check_can_use_route(user.id, tier)
+                
+                if not can_use:
+                    return {
+                        'error': 'Daily route limit reached',
+                        'message': 'You have used all your routes for today.',
+                        'limit': usage_info['limit'],
+                        'used': usage_info['used'],
+                        'tier': tier,
+                        'upgrade_message': 'Upgrade to Plus for 50 routes/day or Pro for unlimited routes.',
+                        'upgrade_url': '/subscription'
+                    }, 429
+                
                 data = request.get_json()
                 origin = data.get('origin')
                 destination = data.get('destination')
@@ -51,8 +99,18 @@ class RoutesAPI:
                 response = requests.get(url)
                 directions_data = response.json()
 
-                if directions_data.get('status') != 'OK':
-                    return {'error': directions_data.get('status', 'Unknown error')}, 500
+                # Handle Google API errors with appropriate status codes
+                status = directions_data.get('status', 'Unknown error')
+                if status != 'OK':
+                    # ZERO_RESULTS is not a server error, it's a "no routes found" situation
+                    if status == 'ZERO_RESULTS':
+                        return {'error': 'No routes found between these locations'}, 404
+                    elif status == 'NOT_FOUND':
+                        return {'error': 'One or more locations could not be found'}, 404
+                    elif status == 'INVALID_REQUEST':
+                        return {'error': 'Invalid request - check origin and destination'}, 400
+                    else:
+                        return {'error': f'Google Maps error: {status}'}, 500
 
                 routes = directions_data['routes']
                 route_info = []
@@ -122,9 +180,16 @@ class RoutesAPI:
 
                     route_info.append(route_data)
 
+                # Increment route usage count after successful route calculation
+                usage = RouteUsage.get_today_usage(user.id)
+                usage.increment()
+                
                 return route_info, 200
 
             except Exception as e:
+                import traceback
+                print(f"Route API Error: {str(e)}")
+                print(traceback.format_exc())
                 return {'error': str(e)}, 500
 
 
