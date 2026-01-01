@@ -38,6 +38,7 @@ from api.verify import verify_api
 from api.live import incident_api
 from api.subscription import subscription_api
 from api.stripe_api import stripe_api
+from api.businesses import businesses_api
 
 # database Initialization functions
 from model.carChat import CarChat
@@ -76,6 +77,7 @@ app.register_blueprint(verify_api)
 app.register_blueprint(incident_api)
 app.register_blueprint(subscription_api)
 app.register_blueprint(stripe_api)
+app.register_blueprint(businesses_api)
 
 
 # Tell Flask-Login the view function name of your login route
